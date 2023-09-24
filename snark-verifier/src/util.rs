@@ -150,3 +150,33 @@ where
 {
     v.into_iter().map(f).collect()
 }
+
+#[cfg(any(test, feature = "benchmark"))]
+pub mod test {
+    use crate::util::arithmetic::Field;
+    use rand::{
+        rngs::{OsRng, StdRng},
+        CryptoRng, RngCore, SeedableRng,
+    };
+    use std::{array, iter, ops::Range};
+
+    pub fn std_rng() -> impl RngCore + CryptoRng {
+        StdRng::from_seed(Default::default())
+    }
+
+    pub fn seeded_std_rng() -> impl RngCore + CryptoRng {
+        StdRng::seed_from_u64(OsRng.next_u64())
+    }
+
+    pub fn rand_idx(range: Range<usize>, mut rng: impl RngCore) -> usize {
+        range.start + (rng.next_u64() as usize % (range.end - range.start))
+    }
+
+    pub fn rand_array<F: Field, const N: usize>(mut rng: impl RngCore) -> [F; N] {
+        array::from_fn(|_| F::random(&mut rng))
+    }
+
+    pub fn rand_vec<F: Field>(n: usize, mut rng: impl RngCore) -> Vec<F> {
+        iter::repeat_with(|| F::random(&mut rng)).take(n).collect()
+    }
+}

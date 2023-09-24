@@ -458,7 +458,7 @@ fn prev(b: usize, x_inv: usize) -> usize {
 
 #[cfg(test)]
 mod test {
-    use crate::util::{arithmetic::BooleanHypercube, expression::Rotation};
+    use crate::util::arithmetic::{BooleanHypercube,Rotation};
 
     #[test]
     #[ignore = "cause it takes some minutes to run with release profile"]

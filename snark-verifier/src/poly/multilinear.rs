@@ -636,13 +636,12 @@ mod test {
             Polynomial,
         },
         util::{
-            arithmetic::{BooleanHypercube, Field},
-            expression::Rotation,
+            arithmetic::{BooleanHypercube, Field, Rotation},
             test::rand_vec,
             Itertools,
         },
     };
-    use halo2_curves::bn256::Fr;
+    use halo2_base::halo2_proofs::halo2curves::bn256::Fr;
     use rand::{rngs::OsRng, RngCore};
     use std::iter;
 
