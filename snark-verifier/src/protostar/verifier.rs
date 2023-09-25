@@ -179,7 +179,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         ProperCrtUint<F>: 'a,
     {
         Ok(values.into_iter().fold(
-            self.base_chip.load_constant(ctx, GA::Base::zero()),
+            self.base_chip.load_constant(ctx, GA::Base::one()),
             |acc, value| self.base_chip.mul(ctx, &acc, value),
         ))
     }
@@ -556,6 +556,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
 
         Ok((sum.into_owned(), x))
     }
+
 
     // #[allow(clippy::too_many_arguments)]
     // #[allow(clippy::type_complexity)]
@@ -1032,27 +1033,33 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
 
 }
 
+
 #[cfg(test)]
 mod test {
 // External crates
-use halo2_base::halo2_proofs::{
-    arithmetic::CurveAffine,
-    dev::MockProver,
-    halo2curves::bn256::{self, Fr, Fq}, plonk::Assigned,
-};
-use halo2_base::gates::{
-    builder::{
-        CircuitBuilderStage, GateThreadBuilder, MultiPhaseThreadBreakPoints, RangeCircuitBuilder,
+use halo2_base::{
+    halo2_proofs::{
+        arithmetic::CurveAffine,
+        dev::MockProver,
+        halo2curves::bn256::{self, Fr, Fq},
+        plonk::Assigned,
     },
-    RangeChip,
+    gates::{
+        builder::{
+            CircuitBuilderStage, GateThreadBuilder, MultiPhaseThreadBreakPoints, RangeCircuitBuilder,
+        },
+        RangeChip,
+    },
+    utils::{biguint_to_fe, fe_to_biguint, modulus, CurveAffineExt, ScalarField},
+    Context,
+    AssignedValue,
 };
-use halo2_base::utils::{biguint_to_fe, fe_to_biguint, modulus, CurveAffineExt, ScalarField};
-use halo2_base::{Context, AssignedValue};
 use halo2_ecc::{
-    bn254::{FpChip,FpPoint},
+    bn254::{FpChip, FpPoint},
     fields::{FieldChip, PrimeField},
     bigint::{CRTInteger, FixedCRTInteger, ProperCrtUint},
 };
+
 // Current crate and module
 use crate::loader::{
     evm::{encode_calldata, Address, EvmLoader, ExecutorBuilder},
@@ -1070,9 +1077,23 @@ use super::Chip;
 const LIMBS: usize = 3;
 const BITS: usize = 88;
 
+#[test_case((Fq::from(2), 4) => Fr::from(8) ; "four_powers_of_2")]
+pub fn test_powers (input: (Fq, usize)) -> (Fr) {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
+    //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
+    let range = RangeChip::default(8);
+    let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+    let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+    
+    let a = chip.base_chip.load_private(ctx, input.0.clone());
+    let out = chip.powers(ctx, &a, input.1);
 
-// RUSTFLAGS="-A warnings" cargo test --package snark-verifier  --lib -- protostar::verifier::test::test_inner_product::inner_product_1_1_1_1_1_5 --exact --nocapture
-#[test_case((vec![Fq::one(); 5], vec![Fq::one(); 5]) => Fr::from(5) ; "inner_product(): 1 * 1 + 1 + 1 * 1 == 5")]
+    println!("{:?}", *out.as_ref().unwrap()[3].native().value());
+    *out.unwrap()[3].native().value()
+}
+
+#[test_case((vec![Fq::one(); 5], vec![Fq::one(); 5]) => Fr::from(5) ; "inner_product(): 1 * 1 + ... + 1 * 1 == 5")]
 pub fn test_inner_product (input: (Vec<Fq>, Vec<Fq>)) -> (Fr) {
     let mut builder = GateThreadBuilder::mock();
     let ctx = builder.main(0);
@@ -1083,8 +1104,40 @@ pub fn test_inner_product (input: (Vec<Fq>, Vec<Fq>)) -> (Fr) {
     
     let a = chip.load_witnesses(ctx, &input.0.clone());
     let b = chip.load_witnesses(ctx, &input.1.clone());
-
     let out = chip.inner_product(ctx, &a, &b);
+
+    println!("{:?}", *out.as_ref().unwrap().native().value());
+    *out.unwrap().native().value()
+}
+
+#[test_case((vec![Fq::one(); 3]) => Fr::from(3) ; "sum(): 1 + 1 + 1 == 3")]
+pub fn test_sum (input: (Vec<Fq>)) -> (Fr) {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
+    //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
+    let range = RangeChip::default(8);
+    let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+    let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+    
+    let a = chip.load_witnesses(ctx, &input.clone());
+    let out = chip.sum(ctx, &a);
+
+    println!("{:?}", *out.as_ref().unwrap().native().value());
+    *out.unwrap().native().value()
+}
+
+
+#[test_case((vec![Fq::from(3); 3]) => Fr::from(27) ; "product(): 3 * 3 * 3 == 27")]
+pub fn test_product (input: (Vec<Fq>)) -> (Fr) {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
+    //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
+    let range = RangeChip::default(8);
+    let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+    let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+    
+    let a = chip.load_witnesses(ctx, &input.clone());
+    let out = chip.product(ctx, &a);
 
     println!("{:?}", *out.as_ref().unwrap().native().value());
     *out.unwrap().native().value()
