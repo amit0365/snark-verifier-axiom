@@ -2,7 +2,7 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments, clippy::upper_case_acronyms)]
 #![deny(missing_debug_implementations, unsafe_code, rustdoc::all)] //missing_docs
 #![feature(int_log)]
-
+#![feature(custom_test_frameworks)]
 
 pub mod cost;
 pub mod loader;

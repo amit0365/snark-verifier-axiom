@@ -29,7 +29,7 @@ use halo2_proofs::{
     },
     circuit::Value,
     halo2curves::{
-        bn256::{Bn256, Fr, G1Affine},
+        bn256::{Bn256, Fr, Fq, G1Affine},
         //group::ff::Field,
         FieldExt,
     },
@@ -98,6 +98,14 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
             base_chip,
             _marker: PhantomData,
         }
+    }
+
+    fn load_witnesses<'a>(
+        &self,
+        ctx: &mut Context<F>,
+        witnesses: impl IntoIterator<Item = &'a CF>,
+    ) -> Vec<ProperCrtUint<F>> {
+            witnesses.into_iter().map(|witness| {self.base_chip.load_private( ctx, witness.clone())}).collect_vec()
     }
 
     fn powers(
@@ -186,7 +194,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         self.inner_product(ctx, coeffs, &powers_of_x)
     }
 
-    // too many clones check
+    // todo too many clones check, if dont use &x get weird long recursive error 
     fn lagrange_and_eval(
         &self,
         ctx: &mut Context<F>,
@@ -1031,7 +1039,7 @@ mod test {
 use halo2_base::halo2_proofs::{
     arithmetic::CurveAffine,
     dev::MockProver,
-    halo2curves::bn256::{self,Fr},
+    halo2curves::bn256::{self, Fr, Fq}, plonk::Assigned,
 };
 use halo2_base::gates::{
     builder::{
@@ -1040,9 +1048,12 @@ use halo2_base::gates::{
     RangeChip,
 };
 use halo2_base::utils::{biguint_to_fe, fe_to_biguint, modulus, CurveAffineExt, ScalarField};
-use halo2_base::Context;
-use halo2_ecc::{bn254::FpChip,fields::{FieldChip, PrimeField}};
-
+use halo2_base::{Context, AssignedValue};
+use halo2_ecc::{
+    bn254::{FpChip,FpPoint},
+    fields::{FieldChip, PrimeField},
+    bigint::{CRTInteger, FixedCRTInteger, ProperCrtUint},
+};
 // Current crate and module
 use crate::loader::{
     evm::{encode_calldata, Address, EvmLoader, ExecutorBuilder},
@@ -1051,53 +1062,42 @@ use crate::loader::{
     Loader,
 };
 
+use test_case::test_case;
 use std::{env::var, fs::File, io::Cursor, rc::Rc};
-
-const LIMBS: usize = 3;
-const BITS: usize = 88;
 
 // Current module
 use super::Chip;
 
-// type TestChip = Chip<'chip, F, CF, GA, L>;
+const LIMBS: usize = 3;
+const BITS: usize = 88;
 
-#[test]
-pub fn test_new_chip() {
-    let lookup_bits = 8;
+// RUSTFLAGS="-A warnings" cargo test --package snark-verifier  --lib -- protostar::verifier::test::test_lagrange_eval::lagrange_eval_constant_fn --exact --nocapture
+
+#[test_case(&[0, 1, 2].map(Fq::from) => (Fr::one()) ; "lagrange_eval(): constant fn")]
+pub fn test_lagrange_eval (input: &[Fq]) -> (Fr) {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
     //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
-    let range = RangeChip::<Fr>::default(lookup_bits);
-    let fp_chip = FpChip::<Fr>::new(&range, BITS, LIMBS);
-    let chip: Chip<'_, _,_, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);
-    println!("{:?}",chip.base_chip.limb_bits)
+    let range = RangeChip::default(8);
+    let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+    let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+    
+    let input = chip.load_witnesses(ctx, input.clone());
+    let a = chip.lagrange_and_eval(ctx, &[(input[0].clone(), input[1].clone())], &input[2]);
+
+    println!("{:?}", *a.as_ref().unwrap().native().value());
+    *a.unwrap().native().value()
+    
 }
 
-// #[test_case(&[0, 1, 2].map(Fr::from) => (Fr::one(), Fr::from(2)) ; "lagrange_eval(): constant fn")]
-// pub fn test_lagrange_eval<F: PrimeField, CF: PrimeField, GA:CurveAffineExt<Base = CF, ScalarExt = F>, L:Loader<GA>>(input: &[F]) -> (F, F) {
+// #[test_case((vec![Witness(Fr::one()); 5], vec![Witness(Fr::one()); 5]) => Fr::from(5) ; "inner_product(): 1 * 1 + ... + 1 * 1 == 5")]
+// pub fn test_inner_product<F: ScalarField>(input: (Vec<QuantumCell<F>>, Vec<QuantumCell<F>>)) -> F {
 //     let mut builder = GateThreadBuilder::mock();
 //     let ctx = builder.main(0);
-//     let input = ctx.assign_witnesses(input.iter().copied());
-//     let a = chip.lagrange_and_eval(ctx, &[(input[0], input[1])], input[2]);
-//     (*a.0.value(), *a.1.value())
+//     let chip = GateChip::default();
+//     let a = chip.inner_product(ctx, input.0, input.1);
+//     *a.value()
 // }
-
-// pub fn lagrange_and_eval_test<F, CF, GA, L>(
-//     ctx: &mut Context<F>,
-//     params: CircuitParams,
-// )
-// where
-//     CF: PrimeField,
-//     F: PrimeField,
-//     GA: CurveAffineExt<Base = CF, ScalarExt = F>,
-//     L: Loader<GA>,
-//  {
-//     let lookup_bits = var("LOOKUP_BITS").unwrap().parse().unwrap();
-//     let range = RangeChip::<Fr>::default(lookup_bits);
-//     let fp_chip = FpChip::new(&range, BITS, LIMBS);
-//     let chip = Chip::<_,_,bn256::G1Affine,NativeLoader>::new(&fp_chip);
-//     let a = chip.lagrange_and_eval(ctx, &[(input[0], input[1])], input[2]);
-//     assert_eq!(res.value(), &F::one());
-// }
-
 
 }
 
