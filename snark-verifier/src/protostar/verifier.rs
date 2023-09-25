@@ -108,7 +108,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
             witnesses.into_iter().map(|witness| {self.base_chip.load_private( ctx, witness.clone())}).collect_vec()
     }
 
-    fn powers(
+    fn powers_base(
         &self,
         ctx: &mut Context<F>,
         x: &ProperCrtUint<F>,
@@ -134,7 +134,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
     }
 
 
-    fn inner_product<'a, 'b>(
+    fn inner_product_base<'a, 'b>(
         &self,
         ctx: &mut Context<F>,
         a: impl IntoIterator<Item = &'a ProperCrtUint<F>>,
@@ -147,10 +147,10 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
             self.base_chip.mul(ctx, a, b)
         }).collect_vec();
 
-        self.sum(ctx, &values)
+        self.sum_base(ctx, &values)
     }
 
-    fn sum<'a>(
+    fn sum_base<'a>(
         &self,
         ctx: &mut Context<F>,
         values: impl IntoIterator<Item = &'a ProperCrtUint<F>>,
@@ -170,7 +170,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         ))
     }
 
-    fn product<'a>(
+    fn product_base<'a>(
         &self,
         ctx: &mut Context<F>,
         values: impl IntoIterator<Item = &'a ProperCrtUint<F>>,
@@ -184,18 +184,18 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         ))
     }
 
-    fn horner(
+    fn horner_base(
         &self,
         ctx: &mut Context<F>,
         coeffs: &[ProperCrtUint<F>],
         x: &ProperCrtUint<F>,
     ) -> Result<ProperCrtUint<F>, Error> {
-        let powers_of_x = self.powers(ctx, x, coeffs.len())?;
-        self.inner_product(ctx, coeffs, &powers_of_x)
+        let powers_of_x = self.powers_base(ctx, x, coeffs.len())?;
+        self.inner_product_base(ctx, coeffs, &powers_of_x)
     }
 
     // todo too many clones check, if dont use &x get weird long recursive error 
-    fn lagrange_and_eval(
+    fn lagrange_and_eval_base(
         &self,
         ctx: &mut Context<F>,
         coords: &[(ProperCrtUint<F>, ProperCrtUint<F>)],
@@ -500,16 +500,16 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
     //     }
     // }
 
-    fn verify_sum_check<const IS_MSG_EVALS: bool,T>(
+    fn verify_sum_check_base<const IS_MSG_EVALS: bool,T>(
         &self,
         ctx: &mut Context<F>,
         num_vars: usize,
         degree: usize,
         sum: &ProperCrtUint<F>,
-        transcript: &mut T // impl TranscriptInstruction<F, TccChip = Self>,
+        //transcript: &mut T // impl TranscriptInstruction<F, TccChip = Self>,
     ) -> Result<(ProperCrtUint<F>, Vec<ProperCrtUint<F>>), Error> 
     // fix add loader here
-    where T: TranscriptRead<GA,L>
+    // where T: TranscriptRead<GA,L>
     {
         let points = iter::successors(Some(GA::Base::zero()), move |state| Some(GA::Base::one() + state)).take(degree + 1).collect_vec();
         let points = points
@@ -526,6 +526,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
             // x.push(transcript.squeeze_challenge().as_ref().clone());
 
             let msg = Vec::with_capacity(num_vars);
+            //msg.push();
             let sum_from_evals = if IS_MSG_EVALS {
                 FixedCRTInteger::from_native(self.base_chip.add_no_carry(ctx, &msg[0], &msg[1]).value.to_biguint().unwrap(), 
                 self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
@@ -533,7 +534,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
                 self.base_chip.limb_bits,
                 self.base_chip.native_modulus())
             } else {
-                self.sum(ctx, chain![[&msg[0], &msg[0]], &msg[1..]]).unwrap()
+                self.sum_base(ctx, chain![[&msg[0], &msg[0]], &msg[1..]]).unwrap()
             };
             self.base_chip.assert_equal( ctx, &*sum, &sum_from_evals);
 
@@ -544,13 +545,13 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
             .collect();
 
             if IS_MSG_EVALS {
-                sum = Cow::Owned(self.lagrange_and_eval(
+                sum = Cow::Owned(self.lagrange_and_eval_base(
                     ctx,
                     &coords,
                     &x.last().unwrap(),
                 ).unwrap());
             } else {
-                sum = Cow::Owned(self.horner(ctx, &msg, &x.last().unwrap()).unwrap());
+                sum = Cow::Owned(self.horner_base(ctx, &msg, &x.last().unwrap()).unwrap());
             };
         }
 
@@ -1087,7 +1088,7 @@ pub fn test_powers (input: (Fq, usize)) -> (Fr) {
     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
     
     let a = chip.base_chip.load_private(ctx, input.0.clone());
-    let out = chip.powers(ctx, &a, input.1);
+    let out = chip.powers_base(ctx, &a, input.1);
 
     println!("{:?}", *out.as_ref().unwrap()[3].native().value());
     *out.unwrap()[3].native().value()
@@ -1104,7 +1105,7 @@ pub fn test_inner_product (input: (Vec<Fq>, Vec<Fq>)) -> (Fr) {
     
     let a = chip.load_witnesses(ctx, &input.0.clone());
     let b = chip.load_witnesses(ctx, &input.1.clone());
-    let out = chip.inner_product(ctx, &a, &b);
+    let out = chip.inner_product_base(ctx, &a, &b);
 
     println!("{:?}", *out.as_ref().unwrap().native().value());
     *out.unwrap().native().value()
@@ -1120,12 +1121,11 @@ pub fn test_sum (input: (Vec<Fq>)) -> (Fr) {
     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
     
     let a = chip.load_witnesses(ctx, &input.clone());
-    let out = chip.sum(ctx, &a);
+    let out = chip.sum_base(ctx, &a);
 
     println!("{:?}", *out.as_ref().unwrap().native().value());
     *out.unwrap().native().value()
 }
-
 
 #[test_case((vec![Fq::from(3); 3]) => Fr::from(27) ; "product(): 3 * 3 * 3 == 27")]
 pub fn test_product (input: (Vec<Fq>)) -> (Fr) {
@@ -1137,12 +1137,11 @@ pub fn test_product (input: (Vec<Fq>)) -> (Fr) {
     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
     
     let a = chip.load_witnesses(ctx, &input.clone());
-    let out = chip.product(ctx, &a);
+    let out = chip.product_base(ctx, &a);
 
     println!("{:?}", *out.as_ref().unwrap().native().value());
     *out.unwrap().native().value()
 }
-
 
 // RUSTFLAGS="-A warnings" cargo test --package snark-verifier  --lib -- protostar::verifier::test::test_lagrange_eval::lagrange_eval_constant_fn --exact --nocapture
 #[test_case(&[0, 1, 2].map(Fq::from) => (Fr::one()) ; "lagrange_eval(): constant fn")]
@@ -1155,15 +1154,45 @@ pub fn test_lagrange_eval (input: &[Fq]) -> (Fr) {
     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
     
     let input = chip.load_witnesses(ctx, input.clone());
-    let a = chip.lagrange_and_eval(ctx, &[(input[0].clone(), input[1].clone())], &input[2]);
+    let a = chip.lagrange_and_eval_base(ctx, &[(input[0].clone(), input[1].clone())], &input[2]);
 
     println!("{:?}", *a.as_ref().unwrap().native().value());
     *a.unwrap().native().value()
 }
 
+// 4x^3 + 3x^2 + 2x + 1 -- coeff in rev from norm. test if this is an issue elsewhere
+#[test_case(&[1, 2, 3, 4, 2].map(Fq::from) => (Fr::from(49)) ; "horner 1,2,3,4 at 2")]
+pub fn test_horner (input: &[Fq]) -> (Fr) {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
+    //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
+    let range = RangeChip::default(8);
+    let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+    let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+    
+    let input = chip.load_witnesses(ctx, input.clone());
+    let a = chip.horner_base(ctx, &[input[0].clone(), input[1].clone(), input[2].clone(), input[3].clone()], &input[4].clone());
 
+    println!("{:?}", *a.as_ref().unwrap().native().value());
+    *a.unwrap().native().value()
+}
 
-//add test for crt to propercrt
+// #[test_case((&Fq::from(2), 3, 3) => ((Fr::from(26)), vec![2]) ; "horner 1,2,3,4 at 2")]
+// pub fn test_sum_check (input: ( &Fq, usize, usize )) -> ( Fr, Vec<Fr> ) {
+//     let mut builder = GateThreadBuilder::mock();
+//     let ctx = builder.main(0);
+//     //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
+//     let range = RangeChip::default(8);
+//     let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+//     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+    
+//     let a = chip.base_chip.load_private(ctx, input.0.clone());
+//     let out = chip.verify_sum_check_base(ctx, input.0, input.1, &a);
+
+//     println!("{:?}", *out.as_ref().unwrap().0.native().value());
+//     (*out.unwrap().0.native().value(), *out.unwrap().1[0].native().value())
+// }
+
 
 }
 
