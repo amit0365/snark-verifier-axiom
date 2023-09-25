@@ -68,7 +68,7 @@ const SECURE_MDS: usize = 0;
 // type Poseidon<L> = hash::Poseidon<Fr, L, T, RATE>;
 // type BaseFieldEccChip<'chip> = halo2_ecc::ecc::BaseFieldEccChip<'chip, G1Affine>;
 // type Halo2Loader<'chip> = halo2::Halo2Loader<G1Affine, BaseFieldEccChip<'chip>>;
-//type PoseidonTranscript<L, S> = PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
+// type PoseidonTranscript<L, S> = PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
 
 // check overflow for add/sub_no_carry specially for sum. have done mul with carry everywhere
 #[derive(Clone, Debug)]
@@ -145,7 +145,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         let b = b.into_iter();        
         let values = a.zip(b).map(|(a, b)| {
             self.base_chip.mul(ctx, a, b)
-        }).collect::<Vec<_>>();
+        }).collect_vec();
 
         self.sum(ctx, &values)
     }
@@ -247,187 +247,187 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
     }
 
 
-    fn rotation_eval_points( 
-        &self,
-        ctx: &mut Context<F>,
-        x: &[ProperCrtUint<F>],
-        one_minus_x: &[ProperCrtUint<F>],
-        rotation: Rotation,
-    ) -> Result<Vec<Vec<ProperCrtUint<F>>>, Error> {
-        if rotation == Rotation::cur() {
-            return Ok(vec![x.to_vec()]);
-        }
+    // fn rotation_eval_points( 
+    //     &self,
+    //     ctx: &mut Context<F>,
+    //     x: &[ProperCrtUint<F>],
+    //     one_minus_x: &[ProperCrtUint<F>],
+    //     rotation: Rotation,
+    // ) -> Result<Vec<Vec<ProperCrtUint<F>>>, Error> {
+    //     if rotation == Rotation::cur() {
+    //         return Ok(vec![x.to_vec()]);
+    //     }
 
-        let zero = self.base_chip.load_constant(ctx,GA::Base::zero());
-        let one = self.base_chip.load_constant(ctx,GA::Base::one());
-        let distance = rotation.distance();
-        let num_x = x.len() - distance;
-        let points = if rotation < Rotation::cur() {
-            let pattern = rotation_eval_point_pattern::<false>(x.len(), distance);
-            let x = &x[distance..];
-            let one_minus_x = &one_minus_x[distance..];
-            pattern
-                .iter()
-                .map(|pat| {
-                    iter::empty()
-                        .chain((0..num_x).map(|idx| {
-                            if pat.nth_bit(idx) {
-                                &one_minus_x[idx]
-                            } else {
-                                &x[idx]
-                            }
-                        }))
-                        .chain((0..distance).map(|idx| {
-                            if pat.nth_bit(idx + num_x) {
-                                &one
-                            } else {
-                                &zero
-                            }
-                        }))
-                        .cloned()
-                        .collect_vec()
-                })
-                .collect_vec()
-        } else {
-            let pattern = rotation_eval_point_pattern::<true>(x.len(), distance);
-            let x = &x[..num_x];
-            let one_minus_x = &one_minus_x[..num_x];
-            pattern
-                .iter()
-                .map(|pat| {
-                    iter::empty()
-                        .chain((0..distance).map(|idx| if pat.nth_bit(idx) { &one } else { &zero }))
-                        .chain((0..num_x).map(|idx| {
-                            if pat.nth_bit(idx + distance) {
-                                &one_minus_x[idx]
-                            } else {
-                                &x[idx]
-                            }
-                        }))
-                        .cloned()
-                        .collect_vec()
-                })
-                .collect()
-            };
+    //     let zero = self.base_chip.load_constant(ctx,GA::Base::zero());
+    //     let one = self.base_chip.load_constant(ctx,GA::Base::one());
+    //     let distance = rotation.distance();
+    //     let num_x = x.len() - distance;
+    //     let points = if rotation < Rotation::cur() {
+    //         let pattern = rotation_eval_point_pattern::<false>(x.len(), distance);
+    //         let x = &x[distance..];
+    //         let one_minus_x = &one_minus_x[distance..];
+    //         pattern
+    //             .iter()
+    //             .map(|pat| {
+    //                 iter::empty()
+    //                     .chain((0..num_x).map(|idx| {
+    //                         if pat.nth_bit(idx) {
+    //                             &one_minus_x[idx]
+    //                         } else {
+    //                             &x[idx]
+    //                         }
+    //                     }))
+    //                     .chain((0..distance).map(|idx| {
+    //                         if pat.nth_bit(idx + num_x) {
+    //                             &one
+    //                         } else {
+    //                             &zero
+    //                         }
+    //                     }))
+    //                     .cloned()
+    //                     .collect_vec()
+    //             })
+    //             .collect_vec()
+    //     } else {
+    //         let pattern = rotation_eval_point_pattern::<true>(x.len(), distance);
+    //         let x = &x[..num_x];
+    //         let one_minus_x = &one_minus_x[..num_x];
+    //         pattern
+    //             .iter()
+    //             .map(|pat| {
+    //                 iter::empty()
+    //                     .chain((0..distance).map(|idx| if pat.nth_bit(idx) { &one } else { &zero }))
+    //                     .chain((0..num_x).map(|idx| {
+    //                         if pat.nth_bit(idx + distance) {
+    //                             &one_minus_x[idx]
+    //                         } else {
+    //                             &x[idx]
+    //                         }
+    //                     }))
+    //                     .cloned()
+    //                     .collect_vec()
+    //             })
+    //             .collect()
+    //         };
 
-        Ok(points)
-    }
+    //     Ok(points)
+    // }
 
-    fn rotation_eval(
-        &self,
-        ctx: &mut Context<F>,
-        x: &[ProperCrtUint<F>],
-        rotation: Rotation,
-        evals_for_rotation: &[ProperCrtUint<F>],
-    ) -> Result<ProperCrtUint<F>, Error> {
-        if rotation == Rotation::cur() {
-            assert!(evals_for_rotation.len() == 1);
-            return Ok(evals_for_rotation[0].clone());
-        }
+    // fn rotation_eval(
+    //     &self,
+    //     ctx: &mut Context<F>,
+    //     x: &[ProperCrtUint<F>],
+    //     rotation: Rotation,
+    //     evals_for_rotation: &[ProperCrtUint<F>],
+    // ) -> Result<ProperCrtUint<F>, Error> {
+    //     if rotation == Rotation::cur() {
+    //         assert!(evals_for_rotation.len() == 1);
+    //         return Ok(evals_for_rotation[0].clone());
+    //     }
 
-        let num_vars = x.len();
-        let distance = rotation.distance();
-        assert!(evals_for_rotation.len() == 1 << distance);
-        assert!(distance <= num_vars);
+    //     let num_vars = x.len();
+    //     let distance = rotation.distance();
+    //     assert!(evals_for_rotation.len() == 1 << distance);
+    //     assert!(distance <= num_vars);
 
-        let (pattern, nths, x) = if rotation < Rotation::cur() {
-            (
-                rotation_eval_coeff_pattern::<false>(num_vars, distance),
-                (1..=distance).rev().collect_vec(),
-                x[0..distance].iter().rev().collect_vec(),
-            )
-        } else {
-            (
-                rotation_eval_coeff_pattern::<true>(num_vars, distance),
-                (num_vars - 1..).take(distance).collect(),
-                x[num_vars - distance..].iter().collect(),
-            )
-        };
-        x.into_iter()
-            .zip(nths)
-            .enumerate()
-            .fold(
-                Ok(Cow::Borrowed(evals_for_rotation)),
-                |evals, (idx, (x_i, nth))| {
-                    evals.and_then(|evals| {
-                        pattern
-                            .iter()
-                            .step_by(1 << idx)
-                            .map(|pat| pat.nth_bit(nth))
-                            .zip(zip_self!(evals.iter()))
-                            .map(|(bit, (mut eval_0, mut eval_1))| {
-                                if bit {
-                                    std::mem::swap(&mut eval_0, &mut eval_1);
-                                }
-                                let diff = self.base_chip.sub_no_carry(ctx, eval_1, eval_0);
-                                let diff_x_i = self.base_chip.mul(ctx, &diff, x_i);
+    //     let (pattern, nths, x) = if rotation < Rotation::cur() {
+    //         (
+    //             rotation_eval_coeff_pattern::<false>(num_vars, distance),
+    //             (1..=distance).rev().collect_vec(),
+    //             x[0..distance].iter().rev().collect_vec(),
+    //         )
+    //     } else {
+    //         (
+    //             rotation_eval_coeff_pattern::<true>(num_vars, distance),
+    //             (num_vars - 1..).take(distance).collect(),
+    //             x[num_vars - distance..].iter().collect(),
+    //         )
+    //     };
+    //     x.into_iter()
+    //         .zip(nths)
+    //         .enumerate()
+    //         .fold(
+    //             Ok(Cow::Borrowed(evals_for_rotation)),
+    //             |evals, (idx, (x_i, nth))| {
+    //                 evals.and_then(|evals| {
+    //                     pattern
+    //                         .iter()
+    //                         .step_by(1 << idx)
+    //                         .map(|pat| pat.nth_bit(nth))
+    //                         .zip(zip_self!(evals.iter()))
+    //                         .map(|(bit, (mut eval_0, mut eval_1))| {
+    //                             if bit {
+    //                                 std::mem::swap(&mut eval_0, &mut eval_1);
+    //                             }
+    //                             let diff = self.base_chip.sub_no_carry(ctx, eval_1, eval_0);
+    //                             let diff_x_i = self.base_chip.mul(ctx, &diff, x_i);
                                 
-                                Ok(FixedCRTInteger::from_native(self.base_chip.add_no_carry(ctx, &diff_x_i, eval_0).value.to_biguint().unwrap(), 
-                                self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
-                                ctx,
-                                self.base_chip.limb_bits,
-                                self.base_chip.native_modulus()))
+    //                             Ok(FixedCRTInteger::from_native(self.base_chip.add_no_carry(ctx, &diff_x_i, eval_0).value.to_biguint().unwrap(), 
+    //                             self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
+    //                             ctx,
+    //                             self.base_chip.limb_bits,
+    //                             self.base_chip.native_modulus()))
 
-                            })
-                            .try_collect::<_, Vec<_>, _>()
-                            .map(Into::into)
-                    })
-                },
-            )
-            .map(|evals| evals[0].clone())
-    }
+    //                         })
+    //                         .try_collect::<_, Vec<_>, _>()
+    //                         .map(Into::into)
+    //                 })
+    //             },
+    //         )
+    //         .map(|evals| evals[0].clone())
+    // }
 
-    fn eq_xy_coeffs(
-        &self,
-        ctx: &mut Context<F>,
-        y: &[ProperCrtUint<F>],
-    ) -> Result<Vec<ProperCrtUint<F>>, Error> {
-        let mut evals = vec![self.base_chip.load_constant(ctx, GA::Base::one())];
+    // fn eq_xy_coeffs(
+    //     &self,
+    //     ctx: &mut Context<F>,
+    //     y: &[ProperCrtUint<F>],
+    // ) -> Result<Vec<ProperCrtUint<F>>, Error> {
+    //     let mut evals = vec![self.base_chip.load_constant(ctx, GA::Base::one())];
 
-        for y_i in y.iter().rev() {
-            evals = evals
-                .iter()
-                .map(|eval| {
-                    let hi = self.base_chip.mul(ctx, eval, y_i);
-                    let lo = self.base_chip.sub_no_carry(ctx, eval, &hi);
-                    let lo = FixedCRTInteger::from_native(lo.value.to_biguint().unwrap(), 
-                    self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
-                    ctx,
-                    self.base_chip.limb_bits,
-                    self.base_chip.native_modulus());
-                    Ok([lo, hi])
-                })
-                .try_collect::<_, Vec<_>, Error>()?
-                .into_iter()
-                .flatten()
-                .collect();
-        }
+    //     for y_i in y.iter().rev() {
+    //         evals = evals
+    //             .iter()
+    //             .map(|eval| {
+    //                 let hi = self.base_chip.mul(ctx, eval, y_i);
+    //                 let lo = self.base_chip.sub_no_carry(ctx, eval, &hi);
+    //                 let lo = FixedCRTInteger::from_native(lo.value.to_biguint().unwrap(), 
+    //                 self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
+    //                 ctx,
+    //                 self.base_chip.limb_bits,
+    //                 self.base_chip.native_modulus());
+    //                 Ok([lo, hi])
+    //             })
+    //             .try_collect::<_, Vec<_>, Error>()?
+    //             .into_iter()
+    //             .flatten()
+    //             .collect();
+    //     }
 
-        Ok(evals)
-    }
+    //     Ok(evals)
+    // }
 
-    fn eq_xy_eval(
-        &self,
-        ctx: &mut Context<F>,
-        x: &[ProperCrtUint<F>],
-        y: &[ProperCrtUint<F>],
-    ) -> Result<ProperCrtUint<F>, Error> {
-        let terms = izip_eq!(x, y)
-            .map(|(x, y)| {
-                let one = self.base_chip.load_constant(ctx, GA::Base::one());
-                let xy = self.base_chip.mul(ctx, x, y);
-                let two_xy = self.base_chip.add_no_carry(ctx, &xy, &xy);
-                let two_xy_plus_one = self.base_chip.add_no_carry(ctx, &two_xy, &one);
-                let x_plus_y = self.base_chip.add_no_carry(ctx, x, y);
-                Ok(FixedCRTInteger::from_native(self.base_chip.sub_no_carry(ctx, &two_xy_plus_one, &x_plus_y).value.to_biguint().unwrap(), 
-                                self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
-                                ctx,
-                                self.base_chip.limb_bits,
-                                self.base_chip.native_modulus()))
-            })
-            .try_collect::<_, Vec<_>, Error>()?;
-        self.product(ctx, &terms)
-    }
+    // fn eq_xy_eval(
+    //     &self,
+    //     ctx: &mut Context<F>,
+    //     x: &[ProperCrtUint<F>],
+    //     y: &[ProperCrtUint<F>],
+    // ) -> Result<ProperCrtUint<F>, Error> {
+    //     let terms = izip_eq!(x, y)
+    //         .map(|(x, y)| {
+    //             let one = self.base_chip.load_constant(ctx, GA::Base::one());
+    //             let xy = self.base_chip.mul(ctx, x, y);
+    //             let two_xy = self.base_chip.add_no_carry(ctx, &xy, &xy);
+    //             let two_xy_plus_one = self.base_chip.add_no_carry(ctx, &two_xy, &one);
+    //             let x_plus_y = self.base_chip.add_no_carry(ctx, x, y);
+    //             Ok(FixedCRTInteger::from_native(self.base_chip.sub_no_carry(ctx, &two_xy_plus_one, &x_plus_y).value.to_biguint().unwrap(), 
+    //                             self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
+    //                             ctx,
+    //                             self.base_chip.limb_bits,
+    //                             self.base_chip.native_modulus()))
+    //         })
+    //         .try_collect::<_, Vec<_>, Error>()?;
+    //     self.product(ctx, &terms)
+    // }
 
     // #[allow(clippy::too_many_arguments)]
     // fn evaluate(
@@ -783,7 +783,6 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
     //     Ok((g_prime_comm, x, g_prime_eval))
     // }
 
-    // todo change these 3 fns to verify_hyperplonk_gemini_kzg - used by protostar prover
     // todo change self.add(a,b) and other similar fns with self.base_chip.add_no_carry(ctx,a,b)
     // fn verify_ipa<'a>(
     //     &self,
@@ -1071,8 +1070,28 @@ use super::Chip;
 const LIMBS: usize = 3;
 const BITS: usize = 88;
 
-// RUSTFLAGS="-A warnings" cargo test --package snark-verifier  --lib -- protostar::verifier::test::test_lagrange_eval::lagrange_eval_constant_fn --exact --nocapture
 
+// RUSTFLAGS="-A warnings" cargo test --package snark-verifier  --lib -- protostar::verifier::test::test_inner_product::inner_product_1_1_1_1_1_5 --exact --nocapture
+#[test_case((vec![Fq::one(); 5], vec![Fq::one(); 5]) => Fr::from(5) ; "inner_product(): 1 * 1 + 1 + 1 * 1 == 5")]
+pub fn test_inner_product (input: (Vec<Fq>, Vec<Fq>)) -> (Fr) {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
+    //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
+    let range = RangeChip::default(8);
+    let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+    let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+    
+    let a = chip.load_witnesses(ctx, &input.0.clone());
+    let b = chip.load_witnesses(ctx, &input.1.clone());
+
+    let out = chip.inner_product(ctx, &a, &b);
+
+    println!("{:?}", *out.as_ref().unwrap().native().value());
+    *out.unwrap().native().value()
+}
+
+
+// RUSTFLAGS="-A warnings" cargo test --package snark-verifier  --lib -- protostar::verifier::test::test_lagrange_eval::lagrange_eval_constant_fn --exact --nocapture
 #[test_case(&[0, 1, 2].map(Fq::from) => (Fr::one()) ; "lagrange_eval(): constant fn")]
 pub fn test_lagrange_eval (input: &[Fq]) -> (Fr) {
     let mut builder = GateThreadBuilder::mock();
@@ -1087,17 +1106,11 @@ pub fn test_lagrange_eval (input: &[Fq]) -> (Fr) {
 
     println!("{:?}", *a.as_ref().unwrap().native().value());
     *a.unwrap().native().value()
-    
 }
 
-// #[test_case((vec![Witness(Fr::one()); 5], vec![Witness(Fr::one()); 5]) => Fr::from(5) ; "inner_product(): 1 * 1 + ... + 1 * 1 == 5")]
-// pub fn test_inner_product<F: ScalarField>(input: (Vec<QuantumCell<F>>, Vec<QuantumCell<F>>)) -> F {
-//     let mut builder = GateThreadBuilder::mock();
-//     let ctx = builder.main(0);
-//     let chip = GateChip::default();
-//     let a = chip.inner_product(ctx, input.0, input.1);
-//     *a.value()
-// }
+
+
+//add test for crt to propercrt
 
 }
 
@@ -1299,35 +1312,41 @@ pub fn test_lagrange_eval (input: &[Fq]) -> (Fr) {
 //                     },
 //                 );
 //             }
-
-//             #[test]
-//             fn sum_check_vanilla_plonk_with_lookup() {
-//                 use halo2_curves::bn256::Fr;
-//                 use $crate::{
-//                     backend::hyperplonk::util::{
-//                         rand_vanilla_plonk_with_lookup_assignment,
-//                         vanilla_plonk_with_lookup_expression,
-//                     },
-//                     piop::sum_check::test::run_zero_check,
-//                     util::test::{rand_vec, seeded_std_rng},
-//                 };
-
-//                 run_zero_check::<$impl>(
-//                     2..16,
-//                     |num_vars| vanilla_plonk_with_lookup_expression(num_vars),
-//                     |_| ((), ()),
-//                     |num_vars| {
-//                         let (polys, challenges) = rand_vanilla_plonk_with_lookup_assignment(
-//                             num_vars,
-//                             seeded_std_rng(),
-//                             seeded_std_rng(),
-//                         );
-//                         (polys, challenges, rand_vec(num_vars, seeded_std_rng()))
-//                     },
-//                 );
-//             }
 //         };
 //     }
 
 //     pub(super) use tests;
+// }
+
+//plonkish/src/poly/multilinear
+// #[test]
+// fn evaluate_for_rotation() {
+//     let mut rng = OsRng;
+//     for num_vars in 0..16 {
+//         let bh = BooleanHypercube::new(num_vars);
+//         let rotate = |f: &Vec<Fr>| {
+//             (0..1 << num_vars)
+//                 .map(|idx| f[bh.rotate(idx, Rotation::next())])
+//                 .collect_vec()
+//         };
+//         let f = rand_vec(1 << num_vars, &mut rng);
+//         let fs = iter::successors(Some(f), |f| Some(rotate(f)))
+//             .map(MultilinearPolynomial::new)
+//             .take(num_vars)
+//             .collect_vec();
+//         let x = rand_vec::<Fr>(num_vars, &mut rng);
+
+//         for rotation in -(num_vars as i32) + 1..num_vars as i32 {
+//             let rotation = Rotation(rotation);
+//             let (f, f_rotated) = if rotation < Rotation::cur() {
+//                 (fs.last().unwrap(), &fs[fs.len() - rotation.distance() - 1])
+//             } else {
+//                 (fs.first().unwrap(), &fs[rotation.distance()])
+//             };
+//             assert_eq!(
+//                 rotation_eval(&x, rotation, &f.evaluate_for_rotation(&x, rotation)),
+//                 f_rotated.evaluate(&x),
+//             );
+//         }
+//     }
 // }
