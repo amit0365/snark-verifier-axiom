@@ -1,7 +1,7 @@
 //! Generic (S)NARK verifier.
 
 #![allow(clippy::type_complexity, clippy::too_many_arguments, clippy::upper_case_acronyms)]
-#![deny(missing_debug_implementations, missing_docs, unsafe_code, rustdoc::all)]
+#![deny(missing_debug_implementations, unsafe_code, rustdoc::all)] // missing_docs
 
 pub mod cost;
 pub mod loader;

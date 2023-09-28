@@ -216,48 +216,6 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
     }
 
 
-    // fn lagrange_and_eval(
-    //     &self,
-    //     ctx: &mut Context<F>,
-    //     coords: &[(AssignedValue<F>, AssignedValue<F>)],
-    //     x: AssignedValue<F>,
-    // ) -> (AssignedValue<F>, AssignedValue<F>) {
-    //     assert!(!coords.is_empty(), "coords should not be empty");
-    //     let mut z = self.sub(ctx, Existing(x), Existing(coords[0].0));
-    //     for coord in coords.iter().skip(1) {
-    //         let sub = self.sub(ctx, Existing(x), Existing(coord.0));
-    //         z = self.mul(ctx, Existing(z), Existing(sub));
-    //     }
-    //     let mut eval = None;
-    //     for i in 0..coords.len() {
-    //         // compute (x - x_i) * Prod_{j != i} (x_i - x_j)
-    //         let mut denom = self.sub(ctx, Existing(x), Existing(coords[i].0));
-    //         for j in 0..coords.len() {
-    //             if i == j {
-    //                 continue;
-    //             }
-    //             let sub = self.sub(ctx, coords[i].0, coords[j].0);
-    //             denom = self.mul(ctx, denom, sub);
-    //         }
-    //         // TODO: batch inversion
-    //         let is_zero = self.is_zero(ctx, denom);
-    //         self.assert_is_const(ctx, &is_zero, &F::zero());
-
-    //         // y_i / denom
-    //         let quot = self.div_unsafe(ctx, coords[i].1, denom);
-    //         eval = if let Some(eval) = eval {
-    //             let eval = self.add(ctx, eval, quot);
-    //             Some(eval)
-    //         } else {
-    //             Some(quot)
-    //         };
-    //     }
-    //     let out = self.mul(ctx, eval.unwrap(), z);
-    //     (out, z)
-    // }
-
-
-    // todo too many clones check, if dont use &x get weird long recursive error 
     fn lagrange_and_eval_base(
         &self,
         ctx: &mut Context<F>,
@@ -265,46 +223,42 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         x: &ProperCrtUint<F>,
     ) -> Result<ProperCrtUint<F>, Error> {
         assert!(!coords.is_empty(), "coords should not be empty");
-        let mut z = self.base_chip.sub_no_carry(ctx, x.clone(), coords[0].0.clone());
+        let mut z = self.base_chip.sub_no_carry(ctx, x, coords[0].0.clone());
         for coord in coords.iter().skip(1) {
             // todo make sure sub is not zero, i.e challenge should be diff than x_i
-            let sub = self.base_chip.sub_no_carry(ctx, x.clone(), coord.0.clone());
+            let sub = self.base_chip.sub_no_carry(ctx, x, coord.0.clone());
             z = self.base_chip.mul_no_carry(ctx, z, sub).into();
         }
         let mut eval = None;
         for i in 0..coords.len() {
             // compute (x - x_i) * Prod_{j != i} (x_i - x_j)
-            let mut denom = self.base_chip.sub_no_carry(ctx, x.clone(), coords[i].0.clone());
+            let mut denom = self.base_chip.sub_no_carry(ctx, x, coords[i].0.clone());
             for j in 0..coords.len() {
                 if i == j {
                     continue;
                 }
                 let sub = self.base_chip.sub_no_carry(ctx, coords[i].0.clone(), coords[j].0.clone());
-                denom = self.base_chip.mul(ctx, denom.clone(), sub.clone()).into();
+                denom = self.base_chip.mul(ctx, denom, sub).into();
             }
 
             let denom_check = FixedCRTInteger::from_native(denom.value.to_biguint().unwrap(), self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
                                                 ctx,
                                                 self.base_chip.limb_bits,
-                                                self.base_chip.native_modulus(),
-                                            );
+                                                self.base_chip.native_modulus());
 
-            let is_zero = self.base_chip.is_zero(ctx, 
-                denom_check.clone()
-            );
-            // todo check this - primefield doesn't have zero
+            let is_zero = self.base_chip.is_zero(ctx, denom_check);
             self.base_chip.gate().assert_is_const(ctx, &is_zero, &F::ZERO);
 
             // y_i / denom
-            let quot = self.base_chip.divide_unsafe(ctx, coords[i].1.clone(), denom.clone());
+            let quot = self.base_chip.divide_unsafe(ctx, coords[i].1.clone(), denom).into();
             eval = if let Some(eval) = eval {
                 let eval = self.base_chip.add_no_carry(ctx, eval, quot);
                 Some(eval)
             } else {
-                Some(quot.into())
+                Some(quot)
             };
         }
-        let out = self.base_chip.mul(ctx, eval.as_ref().unwrap(), z.clone());
+        let out = self.base_chip.mul(ctx, eval.as_ref().unwrap(), z);
         Ok(out)
     }
 
@@ -568,7 +522,6 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         num_vars: usize,
         degree: usize,
         sum: &ProperCrtUint<F>,
-        //msg: &[ProperCrtUint<F>],
         //transcript: &mut T // impl TranscriptInstruction<F, TccChip = Self>,
     ) -> Result<(ProperCrtUint<F>, Vec<ProperCrtUint<F>>), Error> 
     // fix add loader here
@@ -1138,7 +1091,7 @@ const BITS: usize = 68;
 
 #[test_case((Fq::from(2), 4) => Fr::from(8) ; "four_powers_of_2")]
 pub fn test_powers (input: (Fq, usize)) -> Fr {
-    let mut builder = BaseCircuitBuilder::new(true);
+    let mut builder = BaseCircuitBuilder::new(true).use_lookup_bits(8);
     let range = builder.range_chip();
     let fp_chip = FpChip::new(&range, BITS, LIMBS); 
     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
@@ -1151,7 +1104,7 @@ pub fn test_powers (input: (Fq, usize)) -> Fr {
 
 #[test_case((vec![Fq::one(); 5], vec![Fq::one(); 5]) => Fr::from(5) ; "inner_product(): 1 * 1 + ... + 1 * 1 == 5")]
 pub fn test_inner_product (input: (Vec<Fq>, Vec<Fq>)) -> Fr {
-    let mut builder = BaseCircuitBuilder::new(true);
+    let mut builder = BaseCircuitBuilder::new(true).use_lookup_bits(8);
     let range = builder.range_chip();
     let fp_chip = FpChip::new(&range, BITS, LIMBS); 
     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
@@ -1165,7 +1118,7 @@ pub fn test_inner_product (input: (Vec<Fq>, Vec<Fq>)) -> Fr {
 
 #[test_case(vec![Fq::one(); 3] => Fr::from(3) ; "sum(): 1 + 1 + 1 == 3")]
 pub fn test_sum (input: Vec<Fq>) -> Fr {
-    let mut builder = BaseCircuitBuilder::new(true);
+    let mut builder = BaseCircuitBuilder::new(true).use_lookup_bits(8);
     let range = builder.range_chip();
     let fp_chip = FpChip::new(&range, BITS, LIMBS); 
     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
@@ -1178,7 +1131,7 @@ pub fn test_sum (input: Vec<Fq>) -> Fr {
 
 #[test_case(vec![Fq::from(3); 3] => Fr::from(27) ; "product(): 3 * 3 * 3 == 27")]
 pub fn test_product (input: Vec<Fq>) -> Fr {
-    let mut builder = BaseCircuitBuilder::new(true);
+    let mut builder = BaseCircuitBuilder::new(true).use_lookup_bits(8);
     let range = builder.range_chip();
     let fp_chip = FpChip::new(&range, BITS, LIMBS); 
     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
@@ -1231,7 +1184,7 @@ pub fn test_lagrange_eval2 (input: &[Fq]) -> Fr {
 
 #[test_case(&[1, 2, 2, 3, 4].map(Fq::from) => Fr::from(5) ; "lagrange_eval(): random")]
 pub fn test_lagrange_eval3 (input: &[Fq]) -> Fr {
-    let mut builder = BaseCircuitBuilder::new(true).use_lookup_bits(21);
+    let mut builder = BaseCircuitBuilder::new(true).use_lookup_bits(8);
     let range = builder.range_chip();
     let fp_chip = FpChip::new(&range, BITS, LIMBS); 
     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
@@ -1245,7 +1198,7 @@ pub fn test_lagrange_eval3 (input: &[Fq]) -> Fr {
 // 4x^3 + 3x^2 + 2x + 1 -- coeff in rev from norm. test if this is an issue elsewhere
 #[test_case(&[1, 2, 3, 4, 2].map(Fq::from) => Fr::from(49) ; "horner 1,2,3,4 at 2")]
 pub fn test_horner (input: &[Fq]) -> Fr {
-    let mut builder = BaseCircuitBuilder::new(true);
+    let mut builder = BaseCircuitBuilder::new(true).use_lookup_bits(8);
     let range = builder.range_chip();
     let fp_chip = FpChip::new(&range, BITS, LIMBS); 
     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
