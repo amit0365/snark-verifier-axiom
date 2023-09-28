@@ -133,21 +133,24 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         })
     }
 
-
-    fn inner_product_base<'a, 'b>(
+    fn add(
         &self,
         ctx: &mut Context<F>,
-        a: impl IntoIterator<Item = &'a ProperCrtUint<F>>,
-        b: impl IntoIterator<Item = &'b ProperCrtUint<F>>,
-    ) -> Result<ProperCrtUint<F>, Error> {
-        
-        let a = a.into_iter();
-        let b = b.into_iter();        
-        let values = a.zip(b).map(|(a, b)| {
-            self.base_chip.mul(ctx, a, b)
-        }).collect_vec();
+        a: impl Into<CRTInteger<F>>,
+        b: impl Into<CRTInteger<F>>,
+    ) -> ProperCrtUint<F> {
+        let no_carry = self.base_chip.add_no_carry(ctx, a, b);
+        self.base_chip.carry_mod(ctx, no_carry)
+    }
 
-        self.sum_base(ctx, &values)
+    fn sub(
+        &self,
+        ctx: &mut Context<F>,
+        a: impl Into<CRTInteger<F>>,
+        b: impl Into<CRTInteger<F>>,
+    ) -> ProperCrtUint<F> {
+        let no_carry = self.base_chip.sub_no_carry(ctx, a, b);
+        self.base_chip.carry_mod(ctx, no_carry)
     }
 
     fn sum_base<'a>(
@@ -160,13 +163,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
     {
         Ok(values.into_iter().fold(
             self.base_chip.load_constant(ctx, GA::Base::zero()),
-            |acc, value| 
-                FixedCRTInteger::from_native(self.base_chip.add_no_carry(ctx, &acc, value).value.to_biguint().unwrap(), 
-                self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
-                ctx,
-                self.base_chip.limb_bits,
-                self.base_chip.native_modulus(),
-            ),
+            |acc, value| self.add(ctx, &acc, value),
         ))
     }
 
@@ -184,6 +181,22 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         ))
     }
 
+    fn inner_product_base<'a, 'b>(
+        &self,
+        ctx: &mut Context<F>,
+        a: impl IntoIterator<Item = &'a ProperCrtUint<F>>,
+        b: impl IntoIterator<Item = &'b ProperCrtUint<F>>,
+    ) -> Result<ProperCrtUint<F>, Error> {
+        
+        let a = a.into_iter();
+        let b = b.into_iter();        
+        let values = a.zip(b).map(|(a, b)| {
+            self.base_chip.mul(ctx, a, b)
+        }).collect_vec();
+
+        self.sum_base(ctx, &values)
+    }
+
     fn horner_base(
         &self,
         ctx: &mut Context<F>,
@@ -194,6 +207,48 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         self.inner_product_base(ctx, coeffs, &powers_of_x)
     }
 
+
+    // fn lagrange_and_eval(
+    //     &self,
+    //     ctx: &mut Context<F>,
+    //     coords: &[(AssignedValue<F>, AssignedValue<F>)],
+    //     x: AssignedValue<F>,
+    // ) -> (AssignedValue<F>, AssignedValue<F>) {
+    //     assert!(!coords.is_empty(), "coords should not be empty");
+    //     let mut z = self.sub(ctx, Existing(x), Existing(coords[0].0));
+    //     for coord in coords.iter().skip(1) {
+    //         let sub = self.sub(ctx, Existing(x), Existing(coord.0));
+    //         z = self.mul(ctx, Existing(z), Existing(sub));
+    //     }
+    //     let mut eval = None;
+    //     for i in 0..coords.len() {
+    //         // compute (x - x_i) * Prod_{j != i} (x_i - x_j)
+    //         let mut denom = self.sub(ctx, Existing(x), Existing(coords[i].0));
+    //         for j in 0..coords.len() {
+    //             if i == j {
+    //                 continue;
+    //             }
+    //             let sub = self.sub(ctx, coords[i].0, coords[j].0);
+    //             denom = self.mul(ctx, denom, sub);
+    //         }
+    //         // TODO: batch inversion
+    //         let is_zero = self.is_zero(ctx, denom);
+    //         self.assert_is_const(ctx, &is_zero, &F::zero());
+
+    //         // y_i / denom
+    //         let quot = self.div_unsafe(ctx, coords[i].1, denom);
+    //         eval = if let Some(eval) = eval {
+    //             let eval = self.add(ctx, eval, quot);
+    //             Some(eval)
+    //         } else {
+    //             Some(quot)
+    //         };
+    //     }
+    //     let out = self.mul(ctx, eval.unwrap(), z);
+    //     (out, z)
+    // }
+
+
     // todo too many clones check, if dont use &x get weird long recursive error 
     fn lagrange_and_eval_base(
         &self,
@@ -202,47 +257,57 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         x: &ProperCrtUint<F>,
     ) -> Result<ProperCrtUint<F>, Error> {
         assert!(!coords.is_empty(), "coords should not be empty");
-        let mut z = self.base_chip.sub_no_carry(ctx, x.clone(), coords[0].0.clone());
+        let mut z = self.sub(ctx, x.clone(), coords[0].0.clone());
+        println!("z{:?}", z.as_ref().native());
         for coord in coords.iter().skip(1) {
-            let sub = self.base_chip.sub_no_carry(ctx, x.clone(), coord.0.clone());
+            //todo make sure sub is not zero, i.e challenge should be diff than x_i
+            let sub = self.sub(ctx, x.clone(), coord.0.clone());
             z = self.base_chip.mul(ctx, z, sub).into();
+            println!("coord.0{:?}", coord.0.clone().native());
+            println!("coord.1{:?}", coord.1.clone().native());
+            //println!("sub{:?}", sub.as_ref().native());
+            println!("z{:?}", z.as_ref().native());
+
         }
         let mut eval = None;
         for i in 0..coords.len() {
             // compute (x - x_i) * Prod_{j != i} (x_i - x_j)
-            // todo which denom not used here -- warning: unused variable: `denom`
-            let mut denom = self.base_chip.sub_no_carry(ctx, x.clone(), coords[i].0.clone());
+            // todo which denom not used here -- warning: unused variable: `denom` and not need to mut
+            let mut denom = self.sub(ctx, x.clone(), coords[i].0.clone());
+            println!("i{:?}", i.clone());
+            println!("denom{:?}", denom.as_ref().native());
             for j in 0..coords.len() {
                 if i == j {
                     continue;
                 }
-                let sub = self.base_chip.sub_no_carry(ctx, coords[i].0.clone(), coords[j].0.clone());
+                let sub = self.sub(ctx, coords[i].0.clone(), coords[j].0.clone());
                 let denom = self.base_chip.mul(ctx, denom.clone(), sub.clone());
+                println!("j{:?}", j.clone());
+                //println!("sub{:?}", sub.as_ref().native());
+                println!("denom{:?}", denom.as_ref().native());
+
             }
-            let denom = FixedCRTInteger::from_native(denom.clone().value.to_biguint().unwrap(), 
-            self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
-            ctx,
-            self.base_chip.limb_bits,
-            self.base_chip.native_modulus());
 
             let is_zero = self.base_chip.is_zero(ctx, denom.clone());
+            println!("is_zero{:?}", is_zero.clone().value());
+
             // todo check this - primefield doesn't have zero
             self.base_chip.gate().assert_is_const(ctx, &is_zero, &F::zero());
 
             // y_i / denom
             let quot = self.base_chip.divide_unsafe(ctx, coords[i].1.clone(), denom.clone());
+            println!("quot{:?}", quot.as_ref().native());
+
             eval = if let Some(eval) = eval {
-                let eval = self.base_chip.add_no_carry(ctx, eval, quot);
-                Some(FixedCRTInteger::from_native(eval.value.to_biguint().unwrap(), 
-                    self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
-                    ctx,
-                    self.base_chip.limb_bits,
-                    self.base_chip.native_modulus()))
+                let eval = self.add(ctx, eval, quot);
+                println!("eval{:?}", eval.as_ref().native());
+                Some(eval)
             } else {
                 Some(quot)
             };
         }
-        let out = self.base_chip.mul(ctx, eval.unwrap(), z.clone());
+        let out = self.base_chip.mul(ctx, eval.as_ref().unwrap(), z.clone());
+        println!("z{:?}", z.as_ref().native());
         Ok(out)
     }
 
@@ -359,7 +424,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
     //                             if bit {
     //                                 std::mem::swap(&mut eval_0, &mut eval_1);
     //                             }
-    //                             let diff = self.base_chip.sub_no_carry(ctx, eval_1, eval_0);
+    //                             let diff = self.sub(ctx, eval_1, eval_0);
     //                             let diff_x_i = self.base_chip.mul(ctx, &diff, x_i);
                                 
     //                             Ok(FixedCRTInteger::from_native(self.base_chip.add_no_carry(ctx, &diff_x_i, eval_0).value.to_biguint().unwrap(), 
@@ -500,12 +565,13 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
     //     }
     // }
 
-    fn verify_sum_check_base<const IS_MSG_EVALS: bool,T>(
+    fn verify_sum_check_base<const IS_MSG_EVALS: bool>(
         &self,
         ctx: &mut Context<F>,
         num_vars: usize,
         degree: usize,
         sum: &ProperCrtUint<F>,
+        //msg: &[ProperCrtUint<F>],
         //transcript: &mut T // impl TranscriptInstruction<F, TccChip = Self>,
     ) -> Result<(ProperCrtUint<F>, Vec<ProperCrtUint<F>>), Error> 
     // fix add loader here
@@ -520,25 +586,23 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
 
         let mut sum = Cow::Borrowed(sum);
         let mut x = Vec::with_capacity(num_vars);
-        //let mut transcript = PoseidonTranscript::<NativeLoader, _>; 
+        // let mut transcript = PoseidonTranscript::<NativeLoader, _>; 
         for _ in 0..num_vars{
             // let msg = transcript.read_n_scalars(degree + 1);
             // x.push(transcript.squeeze_challenge().as_ref().clone());
 
-            let msg = Vec::with_capacity(num_vars);
-            //msg.push();
+            // only for testing
+            let msg = self.load_witnesses(ctx, &[GA::Base::from(2), GA::Base::from(5)]);
+            x.push(self.base_chip.load_private(ctx, GA::Base::from(12)));
+
             let sum_from_evals = if IS_MSG_EVALS {
-                FixedCRTInteger::from_native(self.base_chip.add_no_carry(ctx, &msg[0], &msg[1]).value.to_biguint().unwrap(), 
-                self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
-                ctx,
-                self.base_chip.limb_bits,
-                self.base_chip.native_modulus())
+                self.add(ctx, &msg[0], &msg[1])
             } else {
                 self.sum_base(ctx, chain![[&msg[0], &msg[0]], &msg[1..]]).unwrap()
             };
             self.base_chip.assert_equal( ctx, &*sum, &sum_from_evals);
 
-            let coords:Vec<_> = points
+            let coords: Vec<_> = points
             .iter()
             .cloned()
             .zip(msg.iter().cloned())
@@ -548,7 +612,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
                 sum = Cow::Owned(self.lagrange_and_eval_base(
                     ctx,
                     &coords,
-                    &x.last().unwrap(),
+                    &x[0],// &x.last().unwrap(),
                 ).unwrap());
             } else {
                 sum = Cow::Owned(self.horner_base(ctx, &msg, &x.last().unwrap()).unwrap());
@@ -1057,7 +1121,7 @@ use halo2_base::{
 };
 use halo2_ecc::{
     bn254::{FpChip, FpPoint},
-    fields::{FieldChip, PrimeField},
+    fields::{FieldChip, PrimeField, native_fp::NativeFieldChip},
     bigint::{CRTInteger, FixedCRTInteger, ProperCrtUint},
 };
 
@@ -1069,6 +1133,8 @@ use crate::loader::{
     Loader,
 };
 
+use halo2_base::gates::flex_gate::{GateChip, GateInstructions};
+
 use test_case::test_case;
 use std::{env::var, fs::File, io::Cursor, rc::Rc};
 
@@ -1079,7 +1145,7 @@ const LIMBS: usize = 3;
 const BITS: usize = 88;
 
 #[test_case((Fq::from(2), 4) => Fr::from(8) ; "four_powers_of_2")]
-pub fn test_powers (input: (Fq, usize)) -> (Fr) {
+pub fn test_powers (input: (Fq, usize)) -> Fr {
     let mut builder = GateThreadBuilder::mock();
     let ctx = builder.main(0);
     //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
@@ -1092,10 +1158,11 @@ pub fn test_powers (input: (Fq, usize)) -> (Fr) {
 
     println!("{:?}", *out.as_ref().unwrap()[3].native().value());
     *out.unwrap()[3].native().value()
+
 }
 
 #[test_case((vec![Fq::one(); 5], vec![Fq::one(); 5]) => Fr::from(5) ; "inner_product(): 1 * 1 + ... + 1 * 1 == 5")]
-pub fn test_inner_product (input: (Vec<Fq>, Vec<Fq>)) -> (Fr) {
+pub fn test_inner_product (input: (Vec<Fq>, Vec<Fq>)) -> Fr {
     let mut builder = GateThreadBuilder::mock();
     let ctx = builder.main(0);
     //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
@@ -1109,10 +1176,11 @@ pub fn test_inner_product (input: (Vec<Fq>, Vec<Fq>)) -> (Fr) {
 
     println!("{:?}", *out.as_ref().unwrap().native().value());
     *out.unwrap().native().value()
+
 }
 
-#[test_case((vec![Fq::one(); 3]) => Fr::from(3) ; "sum(): 1 + 1 + 1 == 3")]
-pub fn test_sum (input: (Vec<Fq>)) -> (Fr) {
+#[test_case(vec![Fq::one(); 3] => Fr::from(3) ; "sum(): 1 + 1 + 1 == 3")]
+pub fn test_sum (input: Vec<Fq>) -> Fr {
     let mut builder = GateThreadBuilder::mock();
     let ctx = builder.main(0);
     //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
@@ -1125,10 +1193,11 @@ pub fn test_sum (input: (Vec<Fq>)) -> (Fr) {
 
     println!("{:?}", *out.as_ref().unwrap().native().value());
     *out.unwrap().native().value()
+
 }
 
-#[test_case((vec![Fq::from(3); 3]) => Fr::from(27) ; "product(): 3 * 3 * 3 == 27")]
-pub fn test_product (input: (Vec<Fq>)) -> (Fr) {
+#[test_case(vec![Fq::from(3); 3] => Fr::from(27) ; "product(): 3 * 3 * 3 == 27")]
+pub fn test_product (input: Vec<Fq>) -> Fr {
     let mut builder = GateThreadBuilder::mock();
     let ctx = builder.main(0);
     //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
@@ -1141,11 +1210,12 @@ pub fn test_product (input: (Vec<Fq>)) -> (Fr) {
 
     println!("{:?}", *out.as_ref().unwrap().native().value());
     *out.unwrap().native().value()
+
 }
 
 // RUSTFLAGS="-A warnings" cargo test --package snark-verifier  --lib -- protostar::verifier::test::test_lagrange_eval::lagrange_eval_constant_fn --exact --nocapture
-#[test_case(&[0, 1, 2].map(Fq::from) => (Fr::one()) ; "lagrange_eval(): constant fn")]
-pub fn test_lagrange_eval (input: &[Fq]) -> (Fr) {
+#[test_case(&[0, 1, 2].map(Fq::from) => Fr::one() ; "lagrange_eval(): constant fn")]
+pub fn test_lagrange_eval (input: &[Fq]) -> Fr {
     let mut builder = GateThreadBuilder::mock();
     let ctx = builder.main(0);
     //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
@@ -1158,11 +1228,75 @@ pub fn test_lagrange_eval (input: &[Fq]) -> (Fr) {
 
     println!("{:?}", *a.as_ref().unwrap().native().value());
     *a.unwrap().native().value()
+
+}
+
+#[test_case(&[0, 1, 1, 1, 2].map(Fq::from) => Fr::one() ; "lagrange_eval(): constant fn2")]
+pub fn test_lagrange_eval4 (input: &[Fq]) -> Fr {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
+    //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
+    let range = RangeChip::default(8);
+    // let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+    let fp_chip = NativeFieldChip::<Fq>::new(range);
+    let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+    
+    let input = chip.load_witnesses(ctx, input.clone());
+    let a = chip.lagrange_and_eval_base(ctx, &[(input[0].clone(), input[1].clone()),(input[2].clone(), input[3].clone())], &input[4]);
+
+    println!("{:?}", *a.as_ref().unwrap().native().value());
+    *a.unwrap().native().value()
+
+}
+
+#[test_case(&[0, 2, 1, 5, 12].map(Fq::from) => Fr::from(38) ; "lagrange_eval(): sumcheck")]
+pub fn test_lagrange_eval2 (input: &[Fq]) -> Fr {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
+    //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
+    let range = RangeChip::default(8);
+    let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+    let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+    
+    let input = chip.load_witnesses(ctx, input.clone());
+    let a = chip.lagrange_and_eval_base(ctx, &[(input[0].clone(), input[1].clone()),(input[2].clone(), input[3].clone())], &input[4]);
+
+    println!("{:?}", *input[4].as_ref().native().value());
+    println!("{:?}", *a.as_ref().unwrap().native().value());
+    *a.unwrap().native().value()
+
+}
+
+#[test_case(&[1, 2, 2, 3, 4].map(Fq::from) => Fr::from(5) ; "lagrange_eval(): random")]
+pub fn test_lagrange_eval3 (input: &[Fq]) -> Fr {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
+    // var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
+    let range = RangeChip::default(8);
+    let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+    let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+    
+    let input = chip.load_witnesses(ctx, input.clone());
+    let a = chip.lagrange_and_eval_base(ctx, &[(input[0].clone(), input[1].clone()),(input[2].clone(), input[3].clone())], &input[4]);
+
+    println!("{:?}", *a.as_ref().unwrap().native().value());
+    *a.unwrap().native().value()
+    
+}
+
+#[test_case(&[0, 1, 1, 1, 2].map(Fr::from) => (Fr::one(), Fr::from(2)) ; "lagrange_eval(): constant fn native")]
+pub fn test_lagrange_eval5<F: ScalarField>(input: &[F]) -> (F, F) {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
+    let chip = GateChip::default();
+    let input = ctx.assign_witnesses(input.iter().copied());
+    let a = chip.lagrange_and_eval(ctx, &[(input[0], input[1]), (input[2].clone(), input[3].clone())], input[4]);
+    (*a.0.value(), *a.1.value())
 }
 
 // 4x^3 + 3x^2 + 2x + 1 -- coeff in rev from norm. test if this is an issue elsewhere
-#[test_case(&[1, 2, 3, 4, 2].map(Fq::from) => (Fr::from(49)) ; "horner 1,2,3,4 at 2")]
-pub fn test_horner (input: &[Fq]) -> (Fr) {
+#[test_case(&[1, 2, 3, 4, 2].map(Fq::from) => Fr::from(49) ; "horner 1,2,3,4 at 2")]
+pub fn test_horner (input: &[Fq]) -> Fr {
     let mut builder = GateThreadBuilder::mock();
     let ctx = builder.main(0);
     //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
@@ -1175,23 +1309,26 @@ pub fn test_horner (input: &[Fq]) -> (Fr) {
 
     println!("{:?}", *a.as_ref().unwrap().native().value());
     *a.unwrap().native().value()
+
 }
 
-// #[test_case((&Fq::from(2), 3, 3) => ((Fr::from(26)), vec![2]) ; "horner 1,2,3,4 at 2")]
-// pub fn test_sum_check (input: ( &Fq, usize, usize )) -> ( Fr, Vec<Fr> ) {
-//     let mut builder = GateThreadBuilder::mock();
-//     let ctx = builder.main(0);
-//     //var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
-//     let range = RangeChip::default(8);
-//     let fp_chip = FpChip::new(&range, BITS, LIMBS); 
-//     let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
+#[test_case(( 1, 1, &Fq::from(7), vec![Fq::from(2), Fq::from(5)]) => ( Fr::from(38), vec![Fr::from(12)]) ; "sumcheck 2, 1, 3 at 12")]
+pub fn test_sum_check (input: ( usize, usize, &Fq, Vec<Fq> )) -> ( Fr, Vec<Fr> ) {
+    let mut builder = GateThreadBuilder::mock();
+    let ctx = builder.main(0);
+    // var("LOOKUP_BITS").unwrap_or_else(|_| panic!("LOOKUP_BITS not set")).parse().unwrap();
+    let range = RangeChip::default(8);
+    let fp_chip = FpChip::new(&range, BITS, LIMBS); 
+    let chip: Chip<_, _, bn256::G1Affine, NativeLoader> = Chip::new(&fp_chip);   
     
-//     let a = chip.base_chip.load_private(ctx, input.0.clone());
-//     let out = chip.verify_sum_check_base(ctx, input.0, input.1, &a);
+    let a = chip.base_chip.load_private(ctx, input.2.clone());
+    let msg = chip.load_witnesses(ctx, &input.3);
+    let out = chip.verify_sum_check_base::<true>(ctx, input.0, input.1, &a);
 
-//     println!("{:?}", *out.as_ref().unwrap().0.native().value());
-//     (*out.unwrap().0.native().value(), *out.unwrap().1[0].native().value())
-// }
+    println!("{:?}", *out.as_ref().unwrap().0.native().value());
+    (*out.as_ref().unwrap().0.native().value(), vec![*out.as_ref().unwrap().1[0].native().value()])
+
+}
 
 
 }
