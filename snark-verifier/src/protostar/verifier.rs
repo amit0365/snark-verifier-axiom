@@ -65,8 +65,8 @@ const SECURE_MDS: usize = 0;
 
 // type BaseFieldEccChip<'chip> = halo2_ecc::ecc::BaseFieldEccChip<'chip, G1Affine>;
 // type Halo2Loader<'chip> = loader::halo2::Halo2Loader<G1Affine, BaseFieldEccChip<'chip>>;
-pub type PoseidonTranscript<L, S> =
-    system::halo2::transcript::halo2::PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
+// pub type PoseidonTranscript<L, S> =
+// system::halo2::transcript::halo2::PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
 
 // check overflow for add/sub_no_carry specially for sum. have done mul with carry everywhere
 #[derive(Clone, Debug)]
@@ -238,7 +238,8 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
                 denom = self.base_chip.mul(ctx, denom, sub).into();
             }
 
-            let denom_check = FixedCRTInteger::from_native(denom.value.to_biguint().unwrap(), self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
+            let denom_check = FixedCRTInteger::from_native(denom.value.to_biguint().unwrap(), 
+                                                self.base_chip.num_limbs, self.base_chip.limb_bits).assign(
                                                 ctx,
                                                 self.base_chip.limb_bits,
                                                 self.base_chip.native_modulus());
@@ -522,7 +523,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         transcript: &mut T     // impl TranscriptInstruction<F, TccChip = Self>,
     ) -> Result<(ProperCrtUint<F>, Vec<ProperCrtUint<F>>), Error> 
     // fix add loader here
-    where T: TranscriptRead<GA,L>
+    where T: TranscriptRead<GA,Halo2Loader<GA,>>
     {
         let points = iter::successors(Some(GA::Base::ZERO), move |state| Some(GA::Base::ONE + state)).take(degree + 1).collect_vec();
         let points = points
@@ -534,9 +535,9 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         let mut sum = Cow::Borrowed(sum);
         let mut x = Vec::with_capacity(num_vars);
               
-            for _ in 0..num_vars{
+            for _ in 0..num_vars {
             let msg = transcript.read_n_scalars(degree + 1).unwrap();
-            x.push(transcript.squeeze_challenge().as_ref().clone());
+            x.push(transcript.squeeze_challenge().clone());
 
             // only for testing
             // let msg = self.load_witnesses(ctx, &[GA::Base::from(2), GA::Base::from(5)]);
