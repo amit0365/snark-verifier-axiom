@@ -33,6 +33,7 @@ paste = "1.0.7"
 rand_chacha = "0.3.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+test-case = "3.1.0"
 # loader_evm
 crossterm = { version = "0.25" }
 tui = { version = "0.19", default-features = false, features = ["crossterm"] }
