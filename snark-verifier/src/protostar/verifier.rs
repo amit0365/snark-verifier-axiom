@@ -63,10 +63,10 @@ const R_F: usize = 8;
 const R_P: usize = 57;
 const SECURE_MDS: usize = 0;
 
-// type Poseidon<L> = hash::Poseidon<Fr, L, T, RATE>;
 // type BaseFieldEccChip<'chip> = halo2_ecc::ecc::BaseFieldEccChip<'chip, G1Affine>;
-// type Halo2Loader<'chip> = halo2::Halo2Loader<G1Affine, BaseFieldEccChip<'chip>>;
-// type PoseidonTranscript<L, S> = PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
+// type Halo2Loader<'chip> = loader::halo2::Halo2Loader<G1Affine, BaseFieldEccChip<'chip>>;
+pub type PoseidonTranscript<L, S> =
+    system::halo2::transcript::halo2::PoseidonTranscript<G1Affine, L, S, T, RATE, R_F, R_P>;
 
 // check overflow for add/sub_no_carry specially for sum. have done mul with carry everywhere
 #[derive(Clone, Debug)]
@@ -145,7 +145,6 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
             )
     }
 
-    // remove carry and convert crt to propercrt
     fn sub(
         &self,
         ctx: &mut Context<F>,
@@ -159,7 +158,6 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
                 self.base_chip.native_modulus(),
             )
     }
-
 
     fn sum_base<'a>(
         &self,
@@ -214,7 +212,6 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
         let powers_of_x = self.powers_base(ctx, x, coeffs.len())?;
         self.inner_product_base(ctx, coeffs, &powers_of_x)
     }
-
 
     fn lagrange_and_eval_base(
         &self,
@@ -516,16 +513,16 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
     //     }
     // }
 
-    fn verify_sum_check_base<const IS_MSG_EVALS: bool>(
+    fn verify_sum_check_base<const IS_MSG_EVALS: bool, T>(
         &self,
         ctx: &mut Context<F>,
         num_vars: usize,
         degree: usize,
         sum: &ProperCrtUint<F>,
-        //transcript: &mut T // impl TranscriptInstruction<F, TccChip = Self>,
+        transcript: &mut T     // impl TranscriptInstruction<F, TccChip = Self>,
     ) -> Result<(ProperCrtUint<F>, Vec<ProperCrtUint<F>>), Error> 
     // fix add loader here
-    // where T: TranscriptRead<GA,L>
+    where T: TranscriptRead<GA,L>
     {
         let points = iter::successors(Some(GA::Base::ZERO), move |state| Some(GA::Base::ONE + state)).take(degree + 1).collect_vec();
         let points = points
@@ -536,14 +533,14 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
 
         let mut sum = Cow::Borrowed(sum);
         let mut x = Vec::with_capacity(num_vars);
-        // let mut transcript = PoseidonTranscript::<NativeLoader, _>; 
-        for _ in 0..num_vars{
-            // let msg = transcript.read_n_scalars(degree + 1);
-            // x.push(transcript.squeeze_challenge().as_ref().clone());
+              
+            for _ in 0..num_vars{
+            let msg = transcript.read_n_scalars(degree + 1).unwrap();
+            x.push(transcript.squeeze_challenge().as_ref().clone());
 
             // only for testing
-            let msg = self.load_witnesses(ctx, &[GA::Base::from(2), GA::Base::from(5)]);
-            x.push(self.base_chip.load_private(ctx, GA::Base::from(12)));
+            // let msg = self.load_witnesses(ctx, &[GA::Base::from(2), GA::Base::from(5)]);
+            // x.push(self.base_chip.load_private(ctx, GA::Base::from(12)));
 
             let sum_from_evals = if IS_MSG_EVALS {
                 self.add(ctx, &msg[0], &msg[1])
@@ -552,7 +549,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
             };
             self.base_chip.assert_equal( ctx, &*sum, &sum_from_evals);
 
-            let coords: Vec<_> = points
+            let coords = points  //: Vec<_>
             .iter()
             .cloned()
             .zip(msg.iter().cloned())
@@ -562,7 +559,7 @@ impl <'range, F, CF, GA, L> Chip<'range, F, CF, GA, L>
                 sum = Cow::Owned(self.lagrange_and_eval_base(
                     ctx,
                     &coords,
-                    &x[0],// &x.last().unwrap(),
+                    &x.last().unwrap(), //&x[0],
                 ).unwrap());
             } else {
                 sum = Cow::Owned(self.horner_base(ctx, &msg, &x.last().unwrap()).unwrap());
