@@ -176,3 +176,31 @@ where
         unimplemented!()
     }
 }
+
+
+#[derive(Clone, Debug)]
+pub struct Evaluation<F> {
+    poly: usize,
+    point: usize,
+    value: F,
+}
+
+// Plonkish
+impl<F> Evaluation<F> {
+    pub fn new(poly: usize, point: usize, value: F) -> Self {
+        Self { poly, point, value }
+    }
+
+    pub fn poly(&self) -> usize {
+        self.poly
+    }
+
+    pub fn point(&self) -> usize {
+        self.point
+    }
+
+    pub fn value(&self) -> &F {
+        &self.value
+    }
+}
+

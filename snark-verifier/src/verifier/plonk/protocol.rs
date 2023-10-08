@@ -374,6 +374,14 @@ impl Query {
     pub fn new<R: Into<Rotation>>(poly: usize, rotation: R) -> Self {
         Self { poly, rotation: rotation.into() }
     }
+    
+    pub fn poly(&self) -> usize {
+        self.poly
+    }
+
+    pub fn rotation(&self) -> Rotation {
+        self.rotation
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

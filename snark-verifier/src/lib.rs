@@ -9,6 +9,7 @@ pub mod pcs;
 pub mod system;
 pub mod util;
 pub mod verifier;
+pub mod poly;
 pub mod protostar;
 
 pub(crate) use halo2_base::halo2_proofs;
